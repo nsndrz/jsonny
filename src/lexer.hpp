@@ -39,10 +39,10 @@ private:
     Token ParseLiteral_();
 
 public:
-    explicit Lexer(std::string_view input);
+    explicit Lexer(std::string_view input) : input_(input), pos_(0) {};
 
     Token Next();
-    // Token Peek() const;
+    Token Peek() const;
     bool IsEof() const { return pos_ >= input_.size(); }
 };
 

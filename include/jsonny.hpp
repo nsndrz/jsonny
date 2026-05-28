@@ -6,6 +6,8 @@
 
 namespace jsonny {
 
+class Lexer;
+
 enum class JsonType { Null, Bool, Number, String, Array, Object };
 
 struct JsonNode {
@@ -30,6 +32,13 @@ private:
 public:
     bool ParseString(const std::string& input);
     const JsonNode& root() const { return root_node_; };
+
+    uint32_t CreateNode(JsonType type);
+    bool ParseValue(Lexer& lexer, uint32_t node_idx);
+    bool ParseObject(Lexer& lexer, uint32_t node_idx);
+    bool ParseArray(Lexer& lexer, uint32_t node_idx);
+
+    void DebugPrint() const;
 };
 
 }
