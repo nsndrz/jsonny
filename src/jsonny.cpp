@@ -1,19 +1,15 @@
 #include <iostream>
+#include <string>
+#include <cstring>
 
 #include "lexer.hpp"
 #include "jsonny.hpp"
 
-
 namespace jsonny {
 
-uint32_t JsonDocument::CreateNode(JsonType type) {
+uint32_t JsonDocument::CreateNode_(JsonType type) {
     JsonNode node;
     node.type = type;
-    node.parent = 0;
-    node.name_offset = 0;
-    node.string_offset = 0;
-    node.number_val = 0.0; 
-
     nodes_.push_back(node);
     return static_cast<uint32_t>(nodes_.size() - 1);
 }
@@ -23,30 +19,30 @@ bool JsonDocument::ParseString(const std::string& input) {
 
     nodes_.clear();
     string_buffer_.clear();
+    root_idx_ = INVALID_INDEX;
 
     Token token = lexer.Next();
-    if (token.type != TokenType::LeftBrace) {
+    if (token.type != TokenType::LeftBrace && token.type != TokenType::LeftBracket) {
         return false;
     }
 
-    uint32_t root_idx = CreateNode(JsonType::Object);
-    root_node_ = nodes_[root_idx];
-    nodes_[root_idx].parent = 0;
-
-    if (!ParseObject(lexer, root_idx)) {
-        return false;
+    root_idx_ = CreateNode_(token.type == TokenType::LeftBrace ? JsonType::Object : JsonType::Array);
+ 
+    if (token.type == TokenType::LeftBrace) {
+        if (!ParseObject_(lexer, root_idx_)) return false;
+    } else {
+        if (!ParseArray_(lexer, root_idx_)) return false;
     }
 
     return true;
 }
 
-bool JsonDocument::ParseValue(Lexer& lexer, uint32_t node_idx) {
+bool JsonDocument::ParseValue_(Lexer& lexer, uint32_t node_idx) {
     Token token = lexer.Next();
 
     switch (token.type) {
         case TokenType::String: {
             nodes_[node_idx].type = JsonType::String;
-
             size_t offset = string_buffer_.size();
             string_buffer_.append(token.value.data(), token.value.size());
             string_buffer_.push_back('\0');
@@ -70,12 +66,12 @@ bool JsonDocument::ParseValue(Lexer& lexer, uint32_t node_idx) {
         }
         case TokenType::LeftBrace: {
             nodes_[node_idx].type = JsonType::Object;
-            if (!ParseObject(lexer, node_idx)) return false;
+            if (!ParseObject_(lexer, node_idx)) return false;
             break;
         }
         case TokenType::LeftBracket: {
             nodes_[node_idx].type = JsonType::Array;
-            if (!ParseArray(lexer, node_idx)) return false;
+            if (!ParseArray_(lexer, node_idx)) return false;
             break;
         }
         default:
@@ -84,7 +80,9 @@ bool JsonDocument::ParseValue(Lexer& lexer, uint32_t node_idx) {
     return true;
 }
 
-bool JsonDocument::ParseObject(Lexer& lexer, uint32_t node_idx) {
+bool JsonDocument::ParseObject_(Lexer& lexer, uint32_t node_idx) {
+    uint32_t last_child = INVALID_INDEX;
+
     while (true) {
         Token token = lexer.Next();
 
@@ -100,16 +98,23 @@ bool JsonDocument::ParseObject(Lexer& lexer, uint32_t node_idx) {
         string_buffer_.append(token.value.data(), token.value.size());
         string_buffer_.push_back('\0');
         
-        uint32_t child_idx = CreateNode(JsonType::Null);
+        uint32_t child_idx = CreateNode_(JsonType::Null);
         nodes_[child_idx].parent = node_idx;
         nodes_[child_idx].name_offset = static_cast<uint32_t>(name_offset);
+
+        if (last_child == INVALID_INDEX) {
+            nodes_[node_idx].first_child = child_idx;
+        } else {
+            nodes_[last_child].next_sibling = child_idx;
+        }
+        last_child = child_idx;
 
         token = lexer.Next();
         if (token.type != TokenType::Colon) {
             return false;
         }
 
-        if (!ParseValue(lexer, child_idx)) {
+        if (!ParseValue_(lexer, child_idx)) {
             return false;
         }
 
@@ -124,7 +129,9 @@ bool JsonDocument::ParseObject(Lexer& lexer, uint32_t node_idx) {
     }
 }
 
-bool JsonDocument::ParseArray(Lexer& lexer, uint32_t node_idx) {
+bool JsonDocument::ParseArray_(Lexer& lexer, uint32_t node_idx) {
+    uint32_t last_child = INVALID_INDEX;
+
     while (true) {
         Token token = lexer.Peek();
         
@@ -133,10 +140,17 @@ bool JsonDocument::ParseArray(Lexer& lexer, uint32_t node_idx) {
             return true;
         }
 
-        uint32_t child_idx = CreateNode(JsonType::Null);
+        uint32_t child_idx = CreateNode_(JsonType::Null);
         nodes_[child_idx].parent = node_idx;
 
-        if (!ParseValue(lexer, child_idx)) {
+        if (last_child == INVALID_INDEX) {
+            nodes_[node_idx].first_child = child_idx;
+        } else {
+            nodes_[last_child].next_sibling = child_idx;
+        }
+        last_child = child_idx;
+
+        if (!ParseValue_(lexer, child_idx)) {
             return false;
         }
 
@@ -151,6 +165,49 @@ bool JsonDocument::ParseArray(Lexer& lexer, uint32_t node_idx) {
     }
 }
 
+uint32_t JsonDocument::FindChildByName(uint32_t parent_idx, const std::string& name) const {
+    if (parent_idx >= nodes_.size()) return INVALID_INDEX;
+    
+    uint32_t current = nodes_[parent_idx].first_child;
+    while (current != INVALID_INDEX) {
+        const auto& node = nodes_[current];
+        const char* key_str = &string_buffer_[node.name_offset];
+        if (std::strcmp(key_str, name.c_str()) == 0) {
+            return current;
+        }
+        current = node.next_sibling;
+    }
+    return INVALID_INDEX;
+}
+
+std::string JsonDocument::GetString(uint32_t node_idx) const {
+    if (node_idx >= nodes_.size() || nodes_[node_idx].type != JsonType::String) {
+        return "";
+    }
+    return std::string(&string_buffer_[nodes_[node_idx].string_offset]);
+}
+
+int JsonDocument::GetInt(uint32_t node_idx) const {
+    if (node_idx >= nodes_.size() || nodes_[node_idx].type != JsonType::Number) {
+        return 0;
+    }
+    return static_cast<int>(nodes_[node_idx].number_val);
+}
+
+float JsonDocument::GetFloat(uint32_t node_idx) const {
+    if (node_idx >= nodes_.size() || nodes_[node_idx].type != JsonType::Number) {
+        return 0.0f;
+    }
+    return static_cast<float>(nodes_[node_idx].number_val);
+}
+
+bool JsonDocument::GetBool(uint32_t node_idx) const {
+    if (node_idx >= nodes_.size() || nodes_[node_idx].type != JsonType::Bool) {
+        return false;
+    }
+    return nodes_[node_idx].bool_val;
+}
+
 void JsonDocument::DebugPrint() const {
     std::cout << "--- JSON DEBUG DUMP ---" << std::endl;
     std::cout << "Total nodes: " << nodes_.size() << std::endl;
@@ -160,10 +217,14 @@ void JsonDocument::DebugPrint() const {
 
         std::cout << "Node [" << i << "] Parent: " << node.parent;
         std::cout << " | Type: " << static_cast<int>(node.type);
+        std::cout << " | FirstChild: " << node.first_child;
+        std::cout << " | NextSibling: " << node.next_sibling;
 
-        if (i != 0) {
-            const char* nameStr = &string_buffer_[node.name_offset];
-            std::cout << " KEY: " << nameStr;
+        if (node.name_offset != 0 || i == root_idx_) {
+             if (i != root_idx_ || node.name_offset != 0) {
+                 const char* nameStr = &string_buffer_[node.name_offset];
+                 std::cout << " KEY: " << nameStr;
+             }
         }
 
         switch (node.type) {

@@ -8,9 +8,13 @@ int main() {
     std::string json_string = R"({"BTN_NEW_GAME": "Новая игра",
                                   "BTN_LOAD_GAME": "Загрузить",
                                   "BTN_EXIT": "Выход",
-                                  "LOADING": "Загрузка"})";
-
-    std::cout << "jsonny test run ..." << std::endl;
+                                  "LOADING": "Загрузка",
+                                  "Units": {
+                                    "Soldier": {
+                                        "hp": 10,
+                                        "move": 5
+                                    }
+                                  }})";
 
     auto start = std::chrono::high_resolution_clock::now();
     bool success = doc.ParseString(json_string);

@@ -4,7 +4,6 @@
 #include <string_view>
 #include <cstdint>
 
-
 namespace jsonny {
 
 enum class TokenType {
